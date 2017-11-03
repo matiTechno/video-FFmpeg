@@ -132,10 +132,12 @@ void Video::decodeNextFrame()
         return;
     }
 
-    if(avcodec_send_packet(codecCtx_, &packet) < 0)
-        return;
+    int frameFinished;
 
-    if(avcodec_receive_frame(codecCtx_, frame_) < 0)
+    // works faster than new api
+    avcodec_decode_video2(codecCtx_, frame_, &frameFinished, &packet);
+
+    if(!frameFinished)
         return;
 
     sws_scale(swsCtx_, reinterpret_cast<const unsigned char* const*>(frame_->data), frame_->linesize, 0, codecCtx_->height,
