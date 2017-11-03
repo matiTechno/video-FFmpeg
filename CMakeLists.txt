@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 project(video)
-set(CMAKE_CXX_FLAGS "-O2 -g -std=c++17 -Wall -Wextra -pedantic -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "-O2 -g -std=c++17 -Wall -Wextra -pedantic")
 add_executable(video main.cpp Video.cpp Video.hpp)
 target_include_directories(video PRIVATE /home/mati/hppv/include)
 target_link_libraries(video PRIVATE /home/mati/hppv/build/src/libhppv.a glfw stdc++fs avcodec avformat avutil swscale pthread)

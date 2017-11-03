@@ -10,6 +10,13 @@ struct AVFrame;
 class Video
 {
 public:
+    Video() = default;
+    ~Video();
+    Video(const Video&) = delete;
+    Video& operator=(const Video&) = delete;
+    Video(Video&&) = delete;
+    Video& operator=(Video&&) = delete;
+
     static void init();
 
     void open(const char* file);
@@ -22,9 +29,12 @@ public:
 
 private:
     AVFormatContext* formatCtx_ = nullptr;
-    SwsContext* swsCtx_ = nullptr;
     int videoStream_;
     AVCodecContext* codecCtx_ = nullptr;
     AVFrame* frame_ = nullptr;
-    AVFrame* targetFrame_ = nullptr;
+    unsigned char* buffer_ = nullptr;
+    AVFrame* outputFrame_ = nullptr;
+    SwsContext* swsCtx_ = nullptr;
+
+    void clearVideo();
 };

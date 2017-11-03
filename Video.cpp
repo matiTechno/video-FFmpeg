@@ -3,14 +3,15 @@
 extern "C"
 {
 #include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
 #include <libavformat/avformat.h>
-#include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 }
 
 #include <glm/vec2.hpp>
 
 #include <hppv/glad.h>
+#include <hppv/Deleter.hpp>
 
 #include "Video.hpp"
 
@@ -19,66 +20,102 @@ void Video::init()
     av_register_all();
 }
 
+Video::~Video()
+{
+    clearVideo();
+}
+
+void Video::clearVideo()
+{
+    if(formatCtx_)
+        avformat_close_input(&formatCtx_);
+
+    if(codecCtx_)
+        avcodec_free_context(&codecCtx_);
+
+    if(frame_)
+        av_frame_free(&frame_);
+
+    if(outputFrame_)
+        av_frame_free(&outputFrame_);
+
+    av_free(buffer_);
+}
+
 void Video::open(const char* file)
 {
-    if(avformat_open_input(&formatCtx_, file, nullptr, nullptr) != 0)
+    std::cout << "opening " << file << std::endl;
+
+    clearVideo();
+
+    if(avformat_open_input(&formatCtx_, file, nullptr, nullptr) < 0)
     {
-        std::cout << "Video, avformat_open_input failed: " << std::endl;
+        std::cout << "avformat_open_input failed" << std::endl;
         return;
     }
 
-    if(avformat_find_stream_info(formatCtx_, nullptr) != 0)
-        return;
-
-    av_dump_format(formatCtx_, 0, file, 0);
-
-    for(std::size_t i = 0; i < formatCtx_->nb_streams; ++i)
+    if(avformat_find_stream_info(formatCtx_, nullptr) < 0)
     {
-        if(formatCtx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+        std::cout << "avformat_find_stream_info failed" << std::endl;
+        return;
+    }
+
+    {
+        std::size_t i;
+        for(i = 0; i < formatCtx_->nb_streams; ++i)
         {
-            videoStream_ = i;
-            break;
+            if(formatCtx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+            {
+                videoStream_ = i;
+                break;
+            }
+        }
+
+        if(i == formatCtx_->nb_streams)
+        {
+            std::cout << "could not find video stream" << std::endl;
         }
     }
 
-    auto* codecCtxStream = formatCtx_->streams[videoStream_]->codec;
-
-    auto* codec = avcodec_find_decoder(codecCtxStream->codec_id);
-
-    if(codec == nullptr)
     {
-        std::cout << "Video, unsupported coded" << std::endl;
-        return;
-    }
+        auto* codecParams = formatCtx_->streams[videoStream_]->codecpar;
+        auto* codec = avcodec_find_decoder(codecParams->codec_id);
 
-    codecCtx_ = avcodec_alloc_context3(codec);
+        if(codec == nullptr)
+        {
+            std::cout << "avcodec_find_decoder failed" << std::endl;
+            return;
+        }
 
-    if(avcodec_copy_context(codecCtx_, codecCtxStream) != 0)
-    {
-        std::cout << "Video, couldn't copy codec context" << std::endl;
-        return;
-    }
+        codecCtx_ = avcodec_alloc_context3(codec);
 
-    if(avcodec_open2(codecCtx_, codec, nullptr) < 0)
-    {
-        std::cout << "Video, couldn't open codec" << std::endl;
-        return;
+        if(avcodec_parameters_to_context(codecCtx_, codecParams) < 0)
+        {
+            std::cout << "avcodec_parameters_to_context failed" << std::endl;
+            return;
+        }
+
+        if(avcodec_open2(codecCtx_, codec, nullptr) < 0)
+        {
+            std::cout << "avcodec_open2 failed" << std::endl;
+            return;
+        }
     }
 
     frame_ = av_frame_alloc();
+    outputFrame_ = av_frame_alloc();
 
-    targetFrame_ = av_frame_alloc();
+    const auto format = AV_PIX_FMT_RGBA;
+    const int align = 32;
 
-    unsigned char* buffer = nullptr;
+    auto size = av_image_get_buffer_size(format, codecCtx_->width, codecCtx_->height, align);
 
-    std::size_t numBytes = avpicture_get_size(AV_PIX_FMT_RGBA, codecCtx_->width, codecCtx_->height);
+    buffer_ = static_cast<unsigned char*>(av_malloc(size * sizeof(char)));
 
-    buffer = static_cast<unsigned char*>(av_malloc(numBytes * sizeof(unsigned char)));
-
-    avpicture_fill((AVPicture *)targetFrame_, buffer, AV_PIX_FMT_RGBA, codecCtx_->width, codecCtx_->height);
+    av_image_fill_arrays(outputFrame_->data, outputFrame_->linesize, buffer_, format, codecCtx_->width, codecCtx_->height, align);
 
     swsCtx_ = sws_getContext(codecCtx_->width, codecCtx_->height, codecCtx_->pix_fmt, codecCtx_->width, codecCtx_->height,
-                             AV_PIX_FMT_RGBA, SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
+                             format, SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
 
     texture_ = hppv::Texture(GL_RGBA8, {codecCtx_->width, codecCtx_->height});
 }
@@ -86,6 +123,8 @@ void Video::open(const char* file)
 void Video::decodeNextFrame()
 {
     AVPacket packet;
+    hppv::Deleter delPacket;
+    delPacket.set([&packet]{av_packet_unref(&packet);});
 
     if(av_read_frame(formatCtx_, &packet) < 0)
     {
@@ -93,28 +132,19 @@ void Video::decodeNextFrame()
         return;
     }
 
-    if(packet.stream_index == videoStream_)
-    {
-        int frameFinished;
+    if(avcodec_send_packet(codecCtx_, &packet) < 0)
+        return;
 
-        avcodec_decode_video2(codecCtx_, frame_, &frameFinished, &packet);
+    if(avcodec_receive_frame(codecCtx_, frame_) < 0)
+        return;
 
-        if(frameFinished)
-        {
-            sws_scale(swsCtx_, (uint8_t const * const *)frame_->data, frame_->linesize, 0, codecCtx_->height,
-                      targetFrame_->data, targetFrame_->linesize);
-
-
-        }
-    }
-
-    av_packet_unref(&packet);
+    sws_scale(swsCtx_, reinterpret_cast<const unsigned char* const*>(frame_->data), frame_->linesize, 0, codecCtx_->height,
+              outputFrame_->data, outputFrame_->linesize);
 }
 
 void Video::uploadTexture()
 {
-    auto* data = targetFrame_->data[0];
-    glm::ivec2 size = {codecCtx_->width, codecCtx_->height};
     texture_.bind();
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    auto size = texture_.getSize();
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, outputFrame_->data[0]);
 }
