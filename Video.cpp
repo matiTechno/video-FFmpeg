@@ -8,10 +8,7 @@ extern "C"
 #include <libswscale/swscale.h>
 }
 
-#include <glm/vec2.hpp>
-
 #include <hppv/glad.h>
-#include <hppv/Deleter.hpp>
 
 #include "Video.hpp"
 
@@ -20,41 +17,17 @@ void Video::init()
     av_register_all();
 }
 
-Video::~Video()
+Video::Video(const std::string& filename)
 {
-    clearVideo();
-}
+    std::cout << "Video: opening " << filename << std::endl;
 
-void Video::clearVideo()
-{
-    if(formatCtx_)
-        avformat_close_input(&formatCtx_);
-
-    if(codecCtx_)
-        avcodec_free_context(&codecCtx_);
-
-    if(frame_)
-        av_frame_free(&frame_);
-
-    if(outputFrame_)
-        av_frame_free(&outputFrame_);
-
-    av_free(buffer_);
-}
-
-void Video::open(const char* file)
-{
-    std::cout << "opening " << file << std::endl;
-
-    clearVideo();
-
-    if(avformat_open_input(&formatCtx_, file, nullptr, nullptr) < 0)
+    if(avformat_open_input(&ffmpeg_.formatCtx, filename.c_str(), nullptr, nullptr) < 0)
     {
         std::cout << "avformat_open_input failed" << std::endl;
         return;
     }
 
-    if(avformat_find_stream_info(formatCtx_, nullptr) < 0)
+    if(avformat_find_stream_info(ffmpeg_.formatCtx, nullptr) < 0)
     {
         std::cout << "avformat_find_stream_info failed" << std::endl;
         return;
@@ -62,24 +35,25 @@ void Video::open(const char* file)
 
     {
         std::size_t i;
-        for(i = 0; i < formatCtx_->nb_streams; ++i)
+        for(i = 0; i < ffmpeg_.formatCtx->nb_streams; ++i)
         {
-            if(formatCtx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+            if(ffmpeg_.formatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
             {
                 videoStream_ = i;
                 break;
             }
         }
 
-        if(i == formatCtx_->nb_streams)
+        if(i == ffmpeg_.formatCtx->nb_streams)
         {
-            std::cout << "could not find video stream" << std::endl;
+            std::cout << "could not find any video stream" << std::endl;
+            return;
         }
     }
 
     {
-        auto* codecParams = formatCtx_->streams[videoStream_]->codecpar;
-        auto* codec = avcodec_find_decoder(codecParams->codec_id);
+        const auto* const codecParams = ffmpeg_.formatCtx->streams[videoStream_]->codecpar;
+        const auto* const codec = avcodec_find_decoder(codecParams->codec_id);
 
         if(codec == nullptr)
         {
@@ -87,66 +61,102 @@ void Video::open(const char* file)
             return;
         }
 
-        codecCtx_ = avcodec_alloc_context3(codec);
+        ffmpeg_.codecCtx = avcodec_alloc_context3(codec);
 
-        if(avcodec_parameters_to_context(codecCtx_, codecParams) < 0)
+        if(avcodec_parameters_to_context(ffmpeg_.codecCtx, codecParams) < 0)
         {
             std::cout << "avcodec_parameters_to_context failed" << std::endl;
             return;
         }
 
-        if(avcodec_open2(codecCtx_, codec, nullptr) < 0)
+        if(avcodec_open2(ffmpeg_.codecCtx, codec, nullptr) < 0)
         {
             std::cout << "avcodec_open2 failed" << std::endl;
             return;
         }
     }
 
-    frame_ = av_frame_alloc();
-    outputFrame_ = av_frame_alloc();
+    ffmpeg_.frame = av_frame_alloc();
+    ffmpeg_.outputFrame = av_frame_alloc();
 
-    const auto format = AV_PIX_FMT_RGBA;
-    const int align = 32;
+    constexpr auto format = AV_PIX_FMT_RGBA;
+    constexpr auto align = 32;
+    const auto size = av_image_get_buffer_size(format, ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
 
-    auto size = av_image_get_buffer_size(format, codecCtx_->width, codecCtx_->height, align);
+    ffmpeg_.buffer = static_cast<unsigned char*>(av_malloc(size * sizeof(char)));
 
-    buffer_ = static_cast<unsigned char*>(av_malloc(size * sizeof(char)));
+    av_image_fill_arrays(ffmpeg_.outputFrame->data, ffmpeg_.outputFrame->linesize, ffmpeg_.buffer, format,
+                         ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
 
-    av_image_fill_arrays(outputFrame_->data, outputFrame_->linesize, buffer_, format, codecCtx_->width, codecCtx_->height, align);
+    ffmpeg_.swsCtx = sws_getContext(ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, ffmpeg_.codecCtx->pix_fmt,
+                                    ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, format, SWS_FAST_BILINEAR,
+                                    nullptr, nullptr, nullptr);
 
-    swsCtx_ = sws_getContext(codecCtx_->width, codecCtx_->height, codecCtx_->pix_fmt, codecCtx_->width, codecCtx_->height,
-                             format, SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
-
-    texture_ = hppv::Texture(GL_RGBA8, {codecCtx_->width, codecCtx_->height});
+    texture = hppv::Texture(GL_RGBA8, {ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height});
 }
 
-void Video::decodeNextFrame()
+void Video::decodeFrame()
 {
-    AVPacket packet;
-    hppv::Deleter delPacket;
-    delPacket.set([&packet]{av_packet_unref(&packet);});
+    if(!isValid())
+        return;
 
-    if(av_read_frame(formatCtx_, &packet) < 0)
+    class PacketDel
     {
-        av_seek_frame(formatCtx_, videoStream_, 0, AVSEEK_FLAG_ANY);
+    public:
+        PacketDel(AVPacket* const packet): packet_(packet) {}
+        ~PacketDel() {av_packet_unref(packet_);}
+        PacketDel(const PacketDel&) = delete;
+        PacketDel& operator=(const PacketDel&) = delete;
+        PacketDel(PacketDel&&) = delete;
+        PacketDel& operator=(PacketDel&&) = delete;
+
+    private:
+        AVPacket* const packet_;
+    };
+
+    AVPacket packet;
+    PacketDel packetDel(&packet);
+
+    if(av_read_frame(ffmpeg_.formatCtx, &packet) < 0)
+    {
+        av_seek_frame(ffmpeg_.formatCtx, videoStream_, 0, AVSEEK_FLAG_ANY);
         return;
     }
 
-    int frameFinished;
-
-    // works faster than new api
-    avcodec_decode_video2(codecCtx_, frame_, &frameFinished, &packet);
-
-    if(!frameFinished)
+    if(avcodec_send_packet(ffmpeg_.codecCtx, &packet) < 0)
         return;
 
-    sws_scale(swsCtx_, reinterpret_cast<const unsigned char* const*>(frame_->data), frame_->linesize, 0, codecCtx_->height,
-              outputFrame_->data, outputFrame_->linesize);
+    if(avcodec_receive_frame(ffmpeg_.codecCtx, ffmpeg_.frame) < 0)
+        return;
+
+    sws_scale(ffmpeg_.swsCtx, reinterpret_cast<const unsigned char* const*>(ffmpeg_.frame->data), ffmpeg_.frame->linesize, 0,
+              ffmpeg_.codecCtx->height, ffmpeg_.outputFrame->data, ffmpeg_.outputFrame->linesize);
 }
 
-void Video::uploadTexture()
+void Video::updateTexture()
 {
-    texture_.bind();
-    auto size = texture_.getSize();
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, outputFrame_->data[0]);
+    if(!isValid())
+        return;
+
+    texture.bind();
+    const auto size = texture.getSize();
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, ffmpeg_.outputFrame->data[0]);
+}
+
+void Video::FFmpegRes::clean()
+{
+    if(formatCtx)
+        avformat_close_input(&formatCtx);
+
+    if(codecCtx)
+        avcodec_free_context(&codecCtx);
+
+    if(frame)
+        av_frame_free(&frame);
+
+    if(outputFrame)
+        av_frame_free(&outputFrame);
+
+    if(buffer)
+        av_freep(&buffer);
 }

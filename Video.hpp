@@ -1,40 +1,78 @@
 #pragma once
 
+#include <string>
+#include <cassert>
+
 #include <hppv/Texture.hpp>
 
 struct AVFormatContext;
-struct SwsContext;
 struct AVCodecContext;
 struct AVFrame;
+struct SwsContext;
 
 class Video
 {
 public:
-    Video() = default;
-    ~Video();
-    Video(const Video&) = delete;
-    Video& operator=(const Video&) = delete;
-    Video(Video&&) = delete;
-    Video& operator=(Video&&) = delete;
-
+    // call once before creating any Video variables
     static void init();
 
-    void open(const char* file);
+    Video() = default;
+    explicit Video(const std::string& filename);
 
-    void decodeNextFrame();
+    void decodeFrame();
 
-    void uploadTexture();
+    void updateTexture();
 
-    hppv::Texture texture_;
+    bool isValid() const {return ffmpeg_.swsCtx;}
+
+    hppv::Texture texture;
 
 private:
-    AVFormatContext* formatCtx_ = nullptr;
     int videoStream_;
-    AVCodecContext* codecCtx_ = nullptr;
-    AVFrame* frame_ = nullptr;
-    unsigned char* buffer_ = nullptr;
-    AVFrame* outputFrame_ = nullptr;
-    SwsContext* swsCtx_ = nullptr;
 
-    void clearVideo();
+    class FFmpegRes
+    {
+    public:
+        FFmpegRes() = default;
+        ~FFmpegRes() {clean();}
+
+        FFmpegRes(const FFmpegRes&) = delete;
+        FFmpegRes& operator=(const FFmpegRes&) = delete;
+
+        FFmpegRes(FFmpegRes&& rhs) {*this = std::move(rhs);}
+
+        FFmpegRes& operator=(FFmpegRes&& rhs)
+        {
+            assert(this != &rhs);
+
+            clean();
+
+            formatCtx = rhs.formatCtx;
+            codecCtx = rhs.codecCtx;
+            frame = rhs.frame;
+            outputFrame = rhs.outputFrame;
+            buffer = rhs.buffer;
+            swsCtx = rhs.swsCtx;
+
+            rhs.formatCtx = nullptr;
+            rhs.codecCtx = nullptr;
+            rhs.frame = nullptr;
+            rhs.outputFrame = nullptr;
+            rhs.buffer = nullptr;
+            rhs.swsCtx = nullptr;
+
+            return *this;
+        }
+
+        AVFormatContext* formatCtx = nullptr;
+        AVCodecContext* codecCtx = nullptr;
+        AVFrame* frame = nullptr;
+        AVFrame* outputFrame = nullptr;
+        unsigned char* buffer = nullptr;
+        SwsContext* swsCtx = nullptr;
+
+    private:
+        void clean();
+    }
+    ffmpeg_;
 };

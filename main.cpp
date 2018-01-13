@@ -1,138 +1,73 @@
-#include <future>
+#include <iostream>
 
 #include <hppv/App.hpp>
-#include <hppv/PrototypeScene.hpp>
-#include <hppv/imgui.h>
+#include <hppv/Prototype.hpp>
 #include <hppv/Renderer.hpp>
-#include <hppv/Shader.hpp>
+#include <hppv/imgui.h>
 
 #include "Video.hpp"
 
-static const char* flipped = R"(
-
-#vertex
-
-#version 330
-
-layout(location = 0) in vec4 vertex;
-layout(location = 1) in vec4 color;
-layout(location = 2) in vec4 texCoords;
-layout(location = 3) in mat4 matrix;
-
-uniform mat4 projection;
-
-out vec4 vColor;
-out vec2 vTexCoords;
-out vec2 vPosition;
-
-void main()
-{
-    gl_Position = projection * matrix * vec4(vertex.xy, 0, 1);
-    vColor = color;
-    vec2 nVertex = vertex.zw;
-    nVertex.y = (nVertex.y - 1) * -1.0;
-    vTexCoords = nVertex.xy * texCoords.zw + texCoords.xy;
-    vPosition = vertex.xy;
-}
-
-#fragment
-
-#version 330
-
-out vec4 color;
-
-in vec4 vColor;
-in vec2 vTexCoords;
-
-uniform sampler2D sampler;
-uniform int type;
-
-void main()
-{
-    color = texture(sampler, vTexCoords) * vColor;
-}
-)";
-
-class Scene: public hppv::PrototypeScene
+class Scene: public hppv::Prototype
 {
 public:
-    Scene():
-        hppv::PrototypeScene(hppv::Space(0.f, 0.f, 0.f, 0.f), 1.f, false),
-        shader_({flipped}, "")
-    {
-        Video::init();
-
-        videoBackground_.open("../hf_jackpot.mp4");
-        videoDragon_.open("../dragon.mov");
-    }
+    Scene(const char* const filename):
+        hppv::Prototype({}),
+        video_(filename)
+    {}
 
 private:
-    Video videoBackground_;
-    Video videoDragon_;
-    hppv::Shader shader_;
+    Video video_;
+
     bool decode_ = true;
-    bool update_ = true;
-    bool future_ = true;
-    glm::vec4 color_ = {0.5f, 0.5f, 0.5f, 1.f};
+    bool updateTexture_ = true;
 
     void prototypeRender(hppv::Renderer& renderer) override
     {
-        renderer.setShader(shader_);
-        renderer.setProjection(hppv::Space(properties_.pos, properties_.size));
-
         if(decode_)
         {
-            if(future_)
-            {
-                auto future = std::async(std::launch::async, [this]{videoBackground_.decodeNextFrame();});
-                videoDragon_.decodeNextFrame();
-                future.get();
-            }
-            else
-            {
-                videoBackground_.decodeNextFrame();
-                videoDragon_.decodeNextFrame();
-            }
+            video_.decodeFrame();
         }
 
-        if(update_)
+        if(updateTexture_)
         {
-            videoBackground_.uploadTexture();
-            videoDragon_.uploadTexture();
+            video_.updateTexture();
         }
 
-        renderer.setTexture(videoBackground_.texture_);
+        renderer.shader(hppv::Render::Tex);
+        renderer.flipTextureY(true);
 
-        hppv::Sprite sprite;
-        sprite.color = color_;
-        sprite.pos = properties_.pos;
-        sprite.size = properties_.size;
-        sprite.texRect = {0.f, 0.f, videoBackground_.texture_.getSize()};
+        hppv::Sprite sprite({0, 0, video_.texture.getSize()});
+        sprite.texRect = {0.f, 0.f, video_.texture.getSize()};
 
+        renderer.projection(hppv::expandToMatchAspectRatio(sprite.toSpace(), properties_.size));
+        renderer.texture(video_.texture);
         renderer.cache(sprite);
 
-        renderer.setTexture(videoDragon_.texture_);
-        sprite.texRect = {0.f, 0.f, videoDragon_.texture_.getSize()};
-
-        renderer.cache(sprite);
-
-        ImGui::Begin("options");
+        ImGui::Begin(prototype_.imguiWindowName);
         {
             ImGui::Checkbox("decode", &decode_);
-            ImGui::Checkbox("upload", &update_);
-            ImGui::Checkbox("future", &future_);
-            ImGui::Spacing();
-            ImGui::ColorPicker4("sprite color", &color_.x);
+            ImGui::Checkbox("upload", &updateTexture_);
         }
         ImGui::End();
     }
 };
 
-int main()
+int main(const int argc, const char* const * const argv)
 {
+    if(argc != 2)
+    {
+        std::cout << "usage: ./video filename" << std::endl;
+        return 1;
+    }
+
     hppv::App app;
-    if(!app.initialize(false)) return 1;
-    app.pushScene<Scene>();
+    hppv::App::InitParams p;
+    p.window.title = "video";
+    if(!app.initialize(p)) return 1;
+
+    Video::init();
+
+    app.pushScene<Scene>(argv[1]);
     app.run();
     return 0;
 }
