@@ -62,7 +62,7 @@ int main(const int argc, const char* const * const argv)
 
     hppv::App app;
     hppv::App::InitParams p;
-    p.window.title = "video";
+    p.window.title = argv[1];
     if(!app.initialize(p)) return 1;
 
     Video::init();
