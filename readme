@@ -1,0 +1,6 @@
+video player implemented on top of hppv
+
+./video <filename>
+
+issues:
+       * frame time spikes with vsync on

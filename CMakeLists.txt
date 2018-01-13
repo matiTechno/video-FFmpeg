@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(video)
+project(video-FFmpeg)
 set(CMAKE_CXX_FLAGS "-O2 -g -std=c++17 -Wall -Wextra -pedantic -fno-exceptions")
 add_executable(video main.cpp Video.cpp Video.hpp)
 target_include_directories(video PRIVATE /home/mati/hppv/include)
