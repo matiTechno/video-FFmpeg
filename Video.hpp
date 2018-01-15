@@ -30,18 +30,18 @@ public:
 private:
     int videoStream_;
 
-    class FFmpegRes
+    class FFmpeg
     {
     public:
-        FFmpegRes() = default;
-        ~FFmpegRes() {clean();}
+        FFmpeg() = default;
+        ~FFmpeg() {clean();}
 
-        FFmpegRes(const FFmpegRes&) = delete;
-        FFmpegRes& operator=(const FFmpegRes&) = delete;
+        FFmpeg(const FFmpeg&) = delete;
+        FFmpeg& operator=(const FFmpeg&) = delete;
 
-        FFmpegRes(FFmpegRes&& rhs) {*this = std::move(rhs);}
+        FFmpeg(FFmpeg&& rhs) {*this = std::move(rhs);}
 
-        FFmpegRes& operator=(FFmpegRes&& rhs)
+        FFmpeg& operator=(FFmpeg&& rhs)
         {
             assert(this != &rhs);
 
@@ -49,27 +49,27 @@ private:
 
             formatCtx = rhs.formatCtx;
             codecCtx = rhs.codecCtx;
-            frame = rhs.frame;
-            outputFrame = rhs.outputFrame;
-            buffer = rhs.buffer;
             swsCtx = rhs.swsCtx;
+            buffer = rhs.buffer;
+            outputFrame = rhs.outputFrame;
+            frame = rhs.frame;
 
             rhs.formatCtx = nullptr;
             rhs.codecCtx = nullptr;
-            rhs.frame = nullptr;
-            rhs.outputFrame = nullptr;
-            rhs.buffer = nullptr;
             rhs.swsCtx = nullptr;
+            rhs.buffer = nullptr;
+            rhs.outputFrame = nullptr;
+            rhs.frame = nullptr;
 
             return *this;
         }
 
         AVFormatContext* formatCtx = nullptr;
         AVCodecContext* codecCtx = nullptr;
-        AVFrame* frame = nullptr;
-        AVFrame* outputFrame = nullptr;
-        unsigned char* buffer = nullptr;
         SwsContext* swsCtx = nullptr;
+        unsigned char* buffer = nullptr;
+        AVFrame* outputFrame = nullptr;
+        AVFrame* frame = nullptr;
 
     private:
         void clean();

@@ -76,21 +76,25 @@ Video::Video(const std::string& filename)
         }
     }
 
-    ffmpeg_.frame = av_frame_alloc();
-    ffmpeg_.outputFrame = av_frame_alloc();
-
     constexpr auto format = AV_PIX_FMT_RGBA;
-    constexpr auto align = 32;
-    const auto size = av_image_get_buffer_size(format, ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
-
-    ffmpeg_.buffer = static_cast<unsigned char*>(av_malloc(size * sizeof(char)));
-
-    av_image_fill_arrays(ffmpeg_.outputFrame->data, ffmpeg_.outputFrame->linesize, ffmpeg_.buffer, format,
-                         ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
 
     ffmpeg_.swsCtx = sws_getContext(ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, ffmpeg_.codecCtx->pix_fmt,
                                     ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, format, SWS_FAST_BILINEAR,
                                     nullptr, nullptr, nullptr);
+
+    constexpr auto align = 32;
+
+    {
+        const auto size = av_image_get_buffer_size(format, ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
+        ffmpeg_.buffer = static_cast<unsigned char*>(av_malloc(size * sizeof(char)));
+    }
+
+    ffmpeg_.outputFrame = av_frame_alloc();
+
+    av_image_fill_arrays(ffmpeg_.outputFrame->data, ffmpeg_.outputFrame->linesize, ffmpeg_.buffer, format,
+                         ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
+
+    ffmpeg_.frame = av_frame_alloc();
 
     texture = hppv::Texture(GL_RGBA8, {ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height});
 }
@@ -143,7 +147,7 @@ void Video::updateTexture()
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, ffmpeg_.outputFrame->data[0]);
 }
 
-void Video::FFmpegRes::clean()
+void Video::FFmpeg::clean()
 {
     if(formatCtx)
         avformat_close_input(&formatCtx);
