@@ -101,9 +101,6 @@ Video::Video(const std::string& filename)
 
 void Video::decodeFrame()
 {
-    if(!isValid())
-        return;
-
     class PacketDel
     {
     public:
@@ -118,10 +115,16 @@ void Video::decodeFrame()
         AVPacket* const packet_;
     };
 
+    if(!isValid())
+        return;
+
     AVPacket packet;
+
+    const auto readFrame = av_read_frame(ffmpeg_.formatCtx, &packet);
+
     PacketDel packetDel(&packet);
 
-    if(av_read_frame(ffmpeg_.formatCtx, &packet) < 0)
+    if(readFrame < 0)
     {
         av_seek_frame(ffmpeg_.formatCtx, videoStream_, 0, AVSEEK_FLAG_ANY);
         return;
@@ -155,12 +158,16 @@ void Video::FFmpeg::clean()
     if(codecCtx)
         avcodec_free_context(&codecCtx);
 
-    if(frame)
-        av_frame_free(&frame);
+    // pointer can be nullptr
+    sws_freeContext(swsCtx);
+    swsCtx = nullptr;
+
+    // pointer can be nullptr
+    av_freep(&buffer);
 
     if(outputFrame)
         av_frame_free(&outputFrame);
 
-    if(buffer)
-        av_freep(&buffer);
+    if(frame)
+        av_frame_free(&frame);
 }

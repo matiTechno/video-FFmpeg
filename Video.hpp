@@ -7,8 +7,8 @@
 
 struct AVFormatContext;
 struct AVCodecContext;
-struct AVFrame;
 struct SwsContext;
+struct AVFrame;
 
 class Video
 {
