@@ -23,13 +23,13 @@ Video::Video(const std::string& filename)
 
     if(avformat_open_input(&ffmpeg_.formatCtx, filename.c_str(), nullptr, nullptr) < 0)
     {
-        std::cout << "avformat_open_input failed" << std::endl;
+        std::cout << "avformat_open_input() failed" << std::endl;
         return;
     }
 
     if(avformat_find_stream_info(ffmpeg_.formatCtx, nullptr) < 0)
     {
-        std::cout << "avformat_find_stream_info failed" << std::endl;
+        std::cout << "avformat_find_stream_info() failed" << std::endl;
         return;
     }
 
@@ -51,13 +51,15 @@ Video::Video(const std::string& filename)
         }
     }
 
+    av_dump_format(ffmpeg_.formatCtx, videoStream_, filename.c_str(), 0);
+
     {
         const auto* const codecParams = ffmpeg_.formatCtx->streams[videoStream_]->codecpar;
         const auto* const codec = avcodec_find_decoder(codecParams->codec_id);
 
         if(codec == nullptr)
         {
-            std::cout << "avcodec_find_decoder failed" << std::endl;
+            std::cout << "avcodec_find_decoder() failed" << std::endl;
             return;
         }
 
@@ -65,13 +67,13 @@ Video::Video(const std::string& filename)
 
         if(avcodec_parameters_to_context(ffmpeg_.codecCtx, codecParams) < 0)
         {
-            std::cout << "avcodec_parameters_to_context failed" << std::endl;
+            std::cout << "avcodec_parameters_to_context() failed" << std::endl;
             return;
         }
 
         if(avcodec_open2(ffmpeg_.codecCtx, codec, nullptr) < 0)
         {
-            std::cout << "avcodec_open2 failed" << std::endl;
+            std::cout << "avcodec_open2() failed" << std::endl;
             return;
         }
     }
@@ -86,7 +88,7 @@ Video::Video(const std::string& filename)
 
     {
         const auto size = av_image_get_buffer_size(format, ffmpeg_.codecCtx->width, ffmpeg_.codecCtx->height, align);
-        ffmpeg_.buffer = static_cast<unsigned char*>(av_malloc(size * sizeof(char)));
+        ffmpeg_.buffer = static_cast<unsigned char*>(av_malloc(size));
     }
 
     ffmpeg_.outputFrame = av_frame_alloc();
@@ -136,7 +138,7 @@ void Video::decodeFrame()
     if(avcodec_receive_frame(ffmpeg_.codecCtx, ffmpeg_.frame) < 0)
         return;
 
-    sws_scale(ffmpeg_.swsCtx, reinterpret_cast<const unsigned char* const*>(ffmpeg_.frame->data), ffmpeg_.frame->linesize, 0,
+    sws_scale(ffmpeg_.swsCtx, ffmpeg_.frame->data, ffmpeg_.frame->linesize, 0,
               ffmpeg_.codecCtx->height, ffmpeg_.outputFrame->data, ffmpeg_.outputFrame->linesize);
 }
 
