@@ -37,7 +37,6 @@ private:
         renderer.flipTextureY(true);
 
         hppv::Sprite sprite({0, 0, video_.texture.getSize()});
-        sprite.texRect = {0.f, 0.f, video_.texture.getSize()};
 
         renderer.projection(hppv::expandToMatchAspectRatio(sprite.toSpace(), properties_.size));
         renderer.texture(video_.texture);
